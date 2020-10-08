@@ -1,30 +1,224 @@
 ---
-title: "ML_Proj."
+title: "PML_Proj."
 author: "Yon Hai"
-date: "8/29/2020"
-output: html_document
+date: "9/29/2020"
+output:
+  html_document: default
+  pdf_document: default
 ---
+
+```{r GlobalOptions}
+options(knitr.duplicate.label = 'allow')
+```
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+### Summary 
 
-This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+Below is a brief description of step-by-step process of prediction for Coursera's Practical Machine Learning project. That includes the process to fetch, clean and  preprocess the data and build three types of prediction models to determine the best way to predict outcomes. Below of a brief discriotion of the background story on the data collection process taken from the project description.   
 
-When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+### Background 
 
-```{r cars}
-summary(cars)
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset).
+
+### Data
+
+The training data for this project are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here:
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+
+
+### Loading packages and data 
+
+```{r, message = FALSE}
+
+## packages 
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(caret)
+library(randomForest)
+library(corrplot)
+library(gbm)
+library(dplyr)
+
+pml_train <- read.csv('pml-training.csv', header=T)
+pml_valid <- read.csv('pml-testing.csv', header=T)
+
+dim(pml_train)
+dim(pml_valid)
+
 ```
 
-## Including Plots
+This shows that we have 19622 observations to train our models and test the models on 20 cases on the valid data. First, We need to remove variables that have little to no significance in predicting the outcomes. 
 
-You can also embed plots, for example:
+## Clean Data: Remove incomplete and irrelevant variables 
 
-```{r pressure, echo=FALSE}
-plot(pressure)
+```{r}
+pml_train  <- pml_train %>%
+  select_if(~ !any(is.na(.)))%>% #incomplete variables 
+  select(-c(1:7))# irrelevant/identification variables 
+
+pml_valid <- pml_valid%>%
+  select_if(~ !any(is.na(.))) %>%
+  select(-c(1:7))
+
+dim(pml_train)
+dim(pml_valid)
+```
+Once we can remove the identification variables and incomplete variables, the training data has 86 variables and the test data has 53 variables. 
+
+## Preparing the datasets for prediction
+
+Preparing the data for prediction includes splitting the data into training and test data. Accordingly,  75% of the pml_train data to train the models and 25% of it to test the models. The models that performs well, with higher level of accuracy score, will be used to predict the outcomes in the pml_valid data. 
+
+```{r}
+
+set.seed(2334) 
+Data_partition <- createDataPartition(pml_train$classe, p = 3/4)[[1]]
+pml_train_Data <- pml_train[Data_partition , ]
+pml_test_Data <- pml_train[-Data_partition , ]
+
+dim(pml_train_Data)
+dim(pml_test_Data)
+```
+
+
+This produced 14718 observation in the training data and 4904 in the test data. We can further clean the data by removing variables with near near zero variance.  
+
+```{r}
+NZV <- nearZeroVar(pml_train)
+pml_train_Data <- pml_train_Data[, -NZV]
+pml_test_Data  <- pml_test_Data[, -NZV]
+
+dim(pml_train_Data)
+dim(pml_test_Data)
+
+```
+Now we have 53 variables left in the dataset. We can now proceed to mapping the relationships between the variables in our dataset. 
+### correlation matrix 
+
+```{r}
+cor_matrix <- cor(pml_train_Data[, -53])
+corrplot(cor_matrix, order = "FPC", method = "color", type = "lower",
+         tl.cex = 0.7,  tl.col = rgb(0, 0, 0))
+
+```
+
+Squares with deep blue colors show strong positive association between the variables, where as squares with deep red colors shows negative association. We can  also list the variables with high level of correlation as follows. Here are the variables with the positive correlation .75 and above. 
+
+```{r}
+highlyCorrelated = findCorrelation(cor_matrix, cutoff=0.75)
+names(pml_train_Data)[highlyCorrelated]
+
+```
+
+### Model Building 
+### Prediction with Random Forest
+
+Now, we will use three types of models to predicts the 20 cases of classe variables in our dataset. the models implemented below are Random Forests, Decision Tree and Generalized Boosted Mode. In each model, we will train the dataset using the plm_train_data and test them on pml_test_data. Confusion matrix will be used to visualize each prediction's accuracy level. This will help us determine the best performing model to apply to out pml_vaid data. 
+
+```{r}
+set.seed(63456)
+controlRF <- trainControl(method="cv", number=3, verboseIter=FALSE)
+mod_rf <- train(classe ~ ., data =pml_train_Data , method = "rf", trControl=controlRF)
+
+```
+
+```{r}
+## prediction on test dataset
+
+predict_mod_rf <- predict(mod_rf, pml_test_Data)
+cm_rf <- confusionMatrix(predict_mod_rf, pml_test_Data$classe)
+cm_rf
+
+```
+
+
+```{r}
+
+plot(cm_rf$table, col = cm_rf$byClass,
+main = paste("Random Forest - Accuracy =", round(cm_rf$overall['Accuracy'], 4)))
+
+``` 
+
+
+
+### Prediction with Decision Trees
+
+```{r}
+
+set.seed(12345)
+decision_Tree <- rpart(classe ~ ., data=pml_train_Data, method="class")
+fancyRpartPlot(decision_Tree)
+
+
+```
+
+
+```{r}
+
+# prediction on test dataset
+
+predict_decision_Tree <- predict(decision_Tree, pml_test_Data, type = "class")
+cm_decision_Tree <- confusionMatrix(predict_decision_Tree, pml_test_Data$classe)
+cm_decision_Tree
+
+```
+
+```{r}
+
+plot(cm_decision_Tree$table, col = cm_decision_Tree$byClass,
+main = paste("Decision_Tree - Accuracy =", round(cm_decision_Tree$overall['Accuracy'], 4)))
+
+``` 
+
+### Prediction with Generalized Boosted Regression Models
+
+```{r}
+
+set.seed(12345)
+controlGBM <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+mod_GBM<- train(classe ~ ., data=pml_train_Data, method = "gbm", trControl = controlGBM, verbose = FALSE)
+mod_GBM$finalModel
+
+```
+
+
+```{r}
+# prediction on test dataset
+
+predict_mod_GBM <- predict(mod_GBM, pml_test_Data)
+cm_GBM <- confusionMatrix(predict_mod_GBM, pml_test_Data$classe)
+cm_GBM
+
+```
+
+
+```{r}
+
+plot(cm_GBM$table, col = cm_GBM$byClass,
+main = paste("Generalized Boosted Regression Models - Accuracy =", round(cm_GBM$overall['Accuracy'], 4)))
+
+``` 
+
+### Model Selection  
+
+The above tests shows that accuracy level of Random Forest, Decision Trees, and Generalized Boosted Regression Models is 0.9933, 0.7469, and 0.9666. This shows that Random Forest model has the highest prediction ability with less than 0.001 out-of-sample error. on the other hand, Decision Tree model has the lowest accuracy level among the three models with around .25 out-of-sample errors. Accordingly, we will use Random Forest model to predict the 20 classe activity on the pml_valid_data (source dataset name: pml-testing)    
+
+```{r}
+
+predict_test_cases <- predict(mod_rf, newdata=pml_valid)
+predict_test_cases
+
 ```
 
 Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
