@@ -3,8 +3,8 @@ title: "PML_Proj."
 author: "Yon Hai"
 date: "9/29/2020"
 output:
-  html_document: default
   pdf_document: default
+  html_document: default
 ---
 
 ```{r GlobalOptions}
